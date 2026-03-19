@@ -1,0 +1,13 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  # Allow NEXT_PUBLIC_* variables in build output - these are intentionally public
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_APP_URL,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,NEXT_PUBLIC_SUPABASE_ANON_KEY"
+  # Exclude migration files from secrets scanning - they contain Stripe price IDs by design
+  SECRETS_SCAN_OMIT_PATHS = "supabase/migrations/**"
+
+# Cache Next.js build output for faster builds
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
