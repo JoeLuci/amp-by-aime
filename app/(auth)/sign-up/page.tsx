@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -39,7 +39,6 @@ export default function SignUpPage() {
     nmlsNumber: '',
   })
   const [isLoading, setIsLoading] = useState(false)
-  const honeypotRef = useRef<HTMLInputElement>(null)
 
   // Roles that require NMLS
   const requiresNMLS = formData.role === 'loan_officer' || formData.role === 'broker_owner'
@@ -69,13 +68,6 @@ export default function SignUpPage() {
     // Validate NMLS if user said they have one
     if (formData.hasNMLS === 'yes' && !formData.nmlsNumber) {
       toast.error('Please enter your NMLS Number')
-      return
-    }
-
-    // Honeypot check — bots fill hidden fields
-    if (honeypotRef.current?.value) {
-      // Silently pretend success so bots don't retry
-      toast.success('Account created successfully! Redirecting to plan selection...')
       return
     }
 
@@ -188,17 +180,6 @@ export default function SignUpPage() {
 
         {/* Sign Up Form */}
         <form onSubmit={handleSignUp} className="space-y-3">
-          {/* Honeypot — invisible to real users, bots will fill it */}
-          <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', height: 0, overflow: 'hidden' }} aria-hidden="true">
-            <input
-              ref={honeypotRef}
-              type="text"
-              name="hp_fax_number_confirm"
-              tabIndex={-1}
-              autoComplete="new-password"
-            />
-          </div>
-
           <div className="grid grid-cols-2 gap-3">
             <Input
               type="text"
