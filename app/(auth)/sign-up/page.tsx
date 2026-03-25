@@ -189,13 +189,13 @@ export default function SignUpPage() {
         {/* Sign Up Form */}
         <form onSubmit={handleSignUp} className="space-y-3">
           {/* Honeypot — invisible to real users, bots will fill it */}
-          <div className="absolute -left-[9999px]" aria-hidden="true">
+          <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', height: 0, overflow: 'hidden' }} aria-hidden="true">
             <input
               ref={honeypotRef}
               type="text"
-              name="website_url"
+              name="hp_fax_number_confirm"
               tabIndex={-1}
-              autoComplete="off"
+              autoComplete="new-password"
             />
           </div>
 
