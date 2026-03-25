@@ -150,6 +150,22 @@ export async function PATCH(
       }
     }
 
+    // If email is changing, update auth.users first
+    if (email !== undefined) {
+      const { error: authEmailError } = await supabaseAdmin.auth.admin.updateUserById(
+        userId,
+        { email }
+      )
+
+      if (authEmailError) {
+        console.error('Error updating auth email:', authEmailError)
+        return NextResponse.json(
+          { error: `Failed to update login email: ${authEmailError.message}` },
+          { status: 500 }
+        )
+      }
+    }
+
     // Update the user profile
     const { data, error } = await supabaseAdmin
       .from('profiles')

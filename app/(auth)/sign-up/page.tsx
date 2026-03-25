@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -39,6 +39,7 @@ export default function SignUpPage() {
     nmlsNumber: '',
   })
   const [isLoading, setIsLoading] = useState(false)
+  const honeypotRef = useRef<HTMLInputElement>(null)
 
   // Roles that require NMLS
   const requiresNMLS = formData.role === 'loan_officer' || formData.role === 'broker_owner'
@@ -71,9 +72,33 @@ export default function SignUpPage() {
       return
     }
 
+    // Honeypot check — bots fill hidden fields
+    if (honeypotRef.current?.value) {
+      // Silently pretend success so bots don't retry
+      toast.success('Account created successfully! Redirecting to plan selection...')
+      return
+    }
+
     setIsLoading(true)
 
     try {
+      // Server-side bot detection (name/email patterns + rate limit)
+      const verifyRes = await fetch('/api/auth/verify-captcha', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fullName: formData.fullName, email: formData.email }),
+      })
+      if (verifyRes.status === 429) {
+        toast.error('Too many signup attempts. Please try again later.')
+        setIsLoading(false)
+        return
+      }
+      if (verifyRes.status === 403) {
+        toast.error('Unable to create account. Please contact support if this is an error.')
+        setIsLoading(false)
+        return
+      }
+
       const supabase = createClient()
 
       // Sign up with metadata
@@ -103,24 +128,25 @@ export default function SignUpPage() {
         nmls_number: formData.nmlsNumber || null,
       })
 
-      // Send contact to GoHighLevel CRM (non-blocking)
+      // Send contact to GoHighLevel CRM — await to prevent navigation from aborting the request
       if (data.user?.id) {
-        fetch('/api/ghl/create-contact', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: data.user.id,
-            email: formData.email,
-            fullName: formData.fullName,
-            phone: formData.phone,
-            role: formData.role,
-            nmlsNumber: formData.nmlsNumber || null,
-            companyName: formData.company,
-          }),
-        }).catch((ghlError) => {
-          // Log but don't block signup flow
+        try {
+          await fetch('/api/ghl/create-contact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: data.user.id,
+              email: formData.email,
+              fullName: formData.fullName,
+              phone: formData.phone,
+              role: formData.role,
+              nmlsNumber: formData.nmlsNumber || null,
+              companyName: formData.company,
+            }),
+          })
+        } catch (ghlError) {
           console.error('GHL contact creation failed:', ghlError)
-        })
+        }
       }
 
       toast.success('Account created successfully! Redirecting to plan selection...')
@@ -162,6 +188,17 @@ export default function SignUpPage() {
 
         {/* Sign Up Form */}
         <form onSubmit={handleSignUp} className="space-y-3">
+          {/* Honeypot — invisible to real users, bots will fill it */}
+          <div className="absolute -left-[9999px]" aria-hidden="true">
+            <input
+              ref={honeypotRef}
+              type="text"
+              name="website_url"
+              tabIndex={-1}
+              autoComplete="off"
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <Input
               type="text"
