@@ -1,26 +1,25 @@
 #!/usr/bin/env bash
 # Top-level wrapper: refresh staging data from prod (both Supabase + GHL).
 #
-# Required env vars (script will fail fast if any are missing):
-#   PROD_DB_URL         Supabase pooler URL for prod
-#   STAGING_DB_URL      Supabase pooler URL for staging
+# Required env vars (script will fail fast if any GHL var is missing).
+# Supabase auth is read from SUPABASE_ACCESS_TOKEN or the macOS Keychain
+# entry written by `supabase login` — no DB password needed.
+#
 #   GHL_PROD_KEY        Private Integration Token for prod GHL sub-account
-#   GHL_PROD_LOC        Prod location ID (cV1D3vLQCdcoLYS0rzU9)
+#   GHL_PROD_LOC        Prod location ID (jkxvgEvFdjquLpd4fomf)
 #   GHL_STAGING_KEY     Private Integration Token for AIME Staging sub-account
 #   GHL_STAGING_LOC     Staging location ID (PJAAN2zV4gJW33Sbm5Sr)
 #
-# Optional flags (forwarded to refresh-ghl.mjs):
-#   --resume    Resume GHL refresh from last completed entity (state at /tmp/refresh-ghl-state.json)
-#   --dry-run   Don't actually write to staging — just enumerate
+# Optional flags (forwarded to both scripts):
+#   --resume    GHL only: resume from last completed entity
+#   --dry-run   Verify connectivity + sample; no TRUNCATE, no writes
 #
-# Order: Supabase first (faster, deterministic), then GHL (slow, network-bound).
+# Order: Supabase first (deterministic, ~30 sec), then GHL (slow, network-bound).
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-: "${PROD_DB_URL:?PROD_DB_URL required}"
-: "${STAGING_DB_URL:?STAGING_DB_URL required}"
 : "${GHL_PROD_KEY:?GHL_PROD_KEY required}"
 : "${GHL_PROD_LOC:?GHL_PROD_LOC required}"
 : "${GHL_STAGING_KEY:?GHL_STAGING_KEY required}"
@@ -31,7 +30,7 @@ echo "AMP staging data refresh — prod → staging"
 echo "================================================================"
 echo "Step 1/2: Supabase data refresh"
 echo "----------------------------------------------------------------"
-bash "$SCRIPT_DIR/refresh-supabase.sh"
+node "$SCRIPT_DIR/refresh-supabase.mjs" "$@"
 
 echo ""
 echo "================================================================"
