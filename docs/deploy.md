@@ -55,27 +55,17 @@ Feature branches do NOT deploy.
    the staging Stripe webhook deliveries page. If anything's broken, fix on
    the same feature branch and push again — staging redeploys.
 
-7. **Open PR #2: feature branch → `main`** once staging QA is clean. This
-   is the prod gate — same reviewer expectations as PR #1, often stricter
-   because the change has now been validated on staging. Merge releases to
-   prod. Railway prod redeploys automatically.
+7. **Open PR #2: feature branch → `main`** once staging QA is clean. Merge
+   releases to prod. Railway prod redeploys automatically.
 
 8. **Verify on prod** (`https://app.brokersarebest.com/`). Watch Railway
    prod logs + Supabase prod logs + Stripe prod webhook deliveries during
    the rollout window.
 
-## Approvers
+## Hard rules
 
-| PR target  | Reviewers required                                              |
-| ---------- | --------------------------------------------------------------- |
-| `staging`  | At least one reviewer with write access. Author can self-merge for trivial doc/comment-only changes. |
-| `main`     | At least one reviewer who did not author the change. Author cannot self-merge. |
-
-**Hard rules:**
-- Never push directly to `main` or `staging` from a working branch
-  (see [`memory/feedback_branch_workflow.md`](../.claude/projects/-Users-akbar-Desktop-aime-amp-by-aime/memory/feedback_branch_workflow.md))
-- Never merge to `main` locally — `main` is updated only via PR merge on GitHub
-- PRs are created manually by the author (not by automation)
+- Never push directly to `main` or `staging` from a working branch.
+- Never merge to `main` locally — `main` is updated only via PR merge on GitHub.
 
 ## Rollback
 
