@@ -46,3 +46,14 @@ supabase/.temp/
 
 # claude code remember plugin (per-user session logs)
 .remember/
+
+# Claude / AI tool artifacts
+.claude.md
+.claude/
+CLAUDE.md
+
+# Loose root-level SQL debug scripts (real migrations live in supabase/migrations/)
+/*.sql
+
+# Misc archives
+*.zip
