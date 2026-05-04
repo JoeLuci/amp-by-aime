@@ -42,3 +42,33 @@ Staging Supabase + GHL can be re-seeded with current prod data using
 [`scripts/refresh-staging-data/README.md`](./scripts/refresh-staging-data/README.md)
 for required env vars and usage. Note: PII is not anonymized — staging
 intentionally mirrors prod so prod users can log into staging.
+
+## How to add a new env var
+
+The repo treats `.env.example` as the canonical list of every env var the app
+or its tooling reads. When you introduce a new env var, do all of the
+following so the next dev (or future you) doesn't get surprised:
+
+1. **Reference the var in code** via `process.env.NAME` (Next.js / Node) or
+   `Deno.env.get('NAME')` (Edge Functions). Never inline the value.
+2. **Add the var to `.env.example`** under the appropriate section
+   (Supabase / Stripe / GHL / Edge-Function-only / Script-only). Include a
+   one-line comment explaining what it does and any gotchas (defaults,
+   per-environment differences, "REQUIRED" vs "OPTIONAL").
+3. **Set the value in every environment that needs it:**
+   - **Local dev**: add to your `.env.local` (gitignored)
+   - **Staging**: Railway → `aime-amp` service → top-left env switcher set
+     to **staging** → Variables tab → add it. Same for Supabase staging
+     Edge Functions: `supabase secrets set --project-ref nuuffnxjsjqdoubvrtcl NAME=...`
+   - **Production**: Railway prod env + (if Edge-Function-consumed) Supabase
+     prod EF secrets via `supabase secrets set --project-ref jrinrobepqsofuhjnxcp ...`
+4. **Update `.env.staging`** (gitignored, local-only reference of what was set
+   in Railway staging) so future refresh / debug doesn't have to re-derive.
+5. **If the var holds a real secret** (key, token, DB password): make sure
+   the value is NEVER committed. The repo's `.github/workflows/secret-scan.yml`
+   blocks PRs that contain secret-shaped strings (Supabase JWT, `sk_live_*`,
+   `pit-*`, `whsec_*`). If the scanner flags a false positive, add the
+   pattern to that workflow's exclude list rather than disabling the scan.
+6. **If the var is consumed by Edge Functions**, also list it under the
+   "Edge Function secrets" reference section in `.env.example` so the next
+   dev knows it's set via `supabase secrets set`, not in `.env.local`.
