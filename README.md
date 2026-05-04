@@ -65,10 +65,7 @@ following so the next dev (or future you) doesn't get surprised:
 4. **Update `.env.staging`** (gitignored, local-only reference of what was set
    in Railway staging) so future refresh / debug doesn't have to re-derive.
 5. **If the var holds a real secret** (key, token, DB password): make sure
-   the value is NEVER committed. The repo's `.github/workflows/secret-scan.yml`
-   blocks PRs that contain secret-shaped strings (Supabase JWT, `sk_live_*`,
-   `pit-*`, `whsec_*`). If the scanner flags a false positive, add the
-   pattern to that workflow's exclude list rather than disabling the scan.
+   the value is NEVER committed. Verify with a quick grep before pushing.
 6. **If the var is consumed by Edge Functions**, also list it under the
    "Edge Function secrets" reference section in `.env.example` so the next
    dev knows it's set via `supabase secrets set`, not in `.env.local`.
