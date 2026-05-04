@@ -82,11 +82,15 @@ const DRY_RUN = process.argv.includes('--dry-run');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const REQUEST_TIMEOUT_MS = 30000; // hard cap so a hung HTTPS connection can't stall a worker
+
 async function ghl(key, method, path, { body, version = VERSION_DEFAULT } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) await sleep(RETRY_BACKOFF_MS * attempt);
     let res;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       res = await fetch(`${BASE}${path}`, {
         method,
@@ -97,10 +101,13 @@ async function ghl(key, method, path, { body, version = VERSION_DEFAULT } = {}) 
           Accept: 'application/json',
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
       });
     } catch (err) {
       lastErr = err;
       continue;
+    } finally {
+      clearTimeout(timer);
     }
     if (res.status === 429) {
       const wait = parseInt(res.headers.get('retry-after') || '5', 10) * 1000;
@@ -244,16 +251,18 @@ async function loadState() {
   if (RESUME && existsSync(STATE_FILE)) {
     const saved = JSON.parse(await readFile(STATE_FILE, 'utf8'));
     state.completedSteps = saved.completedSteps ?? [];
+    if (saved.lastNestedIndex !== undefined) state.lastNestedIndex = saved.lastNestedIndex;
     for (const [k, entries] of Object.entries(saved.idMap ?? {})) {
       if (idMap[k]) idMap[k] = new Map(entries);
     }
-    console.log(`  resumed; completed: ${state.completedSteps.join(', ') || '(none)'}`);
+    console.log(`  resumed; completed: ${state.completedSteps.join(', ') || '(none)'}; nested-resume-from: ${state.lastNestedIndex ?? 0}`);
   }
 }
 
 async function saveState() {
   const data = {
     completedSteps: state.completedSteps,
+    lastNestedIndex: state.lastNestedIndex,
     idMap: Object.fromEntries(Object.entries(idMap).map(([k, m]) => [k, [...m.entries()]])),
   };
   await writeFile(STATE_FILE, JSON.stringify(data, null, 2));
@@ -274,6 +283,65 @@ const strip = (obj, keys) => {
 // ============================================================================
 // CONTACTS
 // ============================================================================
+
+// Whitelist of fields the POST /contacts/ endpoint accepts. The list
+// response (POST /contacts/search) returns a superset including legacy/
+// computed fields (address, businessName, firstNameLowerCase, contactName,
+// businessId) that the create endpoint rejects with 422.
+//
+// `assignedTo` is intentionally excluded — it's a prod user UUID that
+// doesn't exist on staging (staging only has Waleed; per AIME-8 memory).
+const CONTACT_CREATE_FIELDS = [
+  'firstName', 'lastName', 'name', 'email', 'phone',
+  'companyName',
+  'address1', 'city', 'state', 'country', 'postalCode',
+  'website', 'timezone', 'source', 'dateOfBirth',
+  'dnd', 'dndSettings', 'inboundDndSettings',
+  'type', 'customFields', 'tags',
+  'phoneLabel', 'additionalPhones', 'additionalEmails',
+];
+
+function pickContactPayload(c, locationId) {
+  const out = { locationId };
+  for (const k of CONTACT_CREATE_FIELDS) {
+    if (c[k] !== undefined && c[k] !== null) out[k] = c[k];
+  }
+  // Email: drop if malformed — the API rejects with "email must be an email"
+  // and the contact won't get created at all. Better to create with phone/name
+  // than to lose the entire contact for one bad email field.
+  if (out.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(out.email)) {
+    delete out.email;
+  }
+  // dateOfBirth: list returns it as either a number (epoch ms — most common)
+  // or an ISO timestamp string. Create wants a date-only string ("YYYY-MM-DD").
+  if (typeof out.dateOfBirth === 'number') {
+    out.dateOfBirth = new Date(out.dateOfBirth).toISOString().slice(0, 10);
+  } else if (typeof out.dateOfBirth === 'string' && out.dateOfBirth.length > 10) {
+    out.dateOfBirth = out.dateOfBirth.slice(0, 10);
+  } else if (out.dateOfBirth !== undefined && typeof out.dateOfBirth !== 'string') {
+    delete out.dateOfBirth;  // unknown shape — drop rather than fail
+  }
+  // additionalEmails: list returns objects with `validEmailDate` sub-property
+  // that create rejects; keep only the `email` field per item.
+  if (Array.isArray(out.additionalEmails)) {
+    out.additionalEmails = out.additionalEmails
+      .filter((e) => e && typeof e === 'object' && e.email)
+      .map((e) => ({ email: e.email }));
+    if (out.additionalEmails.length === 0) delete out.additionalEmails;
+  }
+  // dndSettings: API rejects "permanent" status on SMS (compliance restriction).
+  // Convert any per-channel "permanent" status to "inactive" — the contact still
+  // copies, just without the carry-over of the permanent DND flag.
+  if (out.dndSettings && typeof out.dndSettings === 'object') {
+    for (const channel of Object.keys(out.dndSettings)) {
+      const setting = out.dndSettings[channel];
+      if (setting && typeof setting === 'object' && setting.status === 'permanent') {
+        setting.status = 'inactive';
+      }
+    }
+  }
+  return out;
+}
 
 async function copyContacts() {
   if (isCompleted('contacts')) { console.log('[contacts] skipped'); return; }
@@ -298,8 +366,7 @@ async function copyContacts() {
   for (let i = 0; i < prod.length; i++) {
     const c = prod[i];
     if (DRY_RUN) { ok++; continue; }
-    const payload = strip(c, ['id', 'locationId', 'dateAdded', 'dateUpdated', 'searchAfter', 'opportunities']);
-    payload.locationId = STAGING_LOC;
+    const payload = pickContactPayload(c, STAGING_LOC);
     try {
       const created = await stgPost('/contacts/', payload);
       const newId = created?.contact?.id ?? created?.id;
@@ -323,67 +390,103 @@ async function copyContacts() {
 // PER-CONTACT NESTED RESOURCES (notes, tasks, tag attachments, followers)
 // ============================================================================
 
-async function copyPerContactNested() {
-  if (isCompleted('perContactNested')) { console.log('[per-contact nested] skipped'); return; }
-  console.log('[per-contact nested] starting (notes, tasks, tags, followers)');
-  const totals = { notes: 0, tasks: 0, tags: 0, followers: 0, fail: 0 };
-  const prodIds = [...idMap.contacts.keys()];
-  for (let i = 0; i < prodIds.length; i++) {
-    const prodId = prodIds[i];
-    const stgId = idMap.contacts.get(prodId);
+// Tracks unique error patterns we've already logged so we don't spam stderr.
+const seenErrorPatterns = new Set();
 
-    // --- notes ---
-    try {
-      const data = await prodGet(`/contacts/${prodId}/notes`);
-      for (const n of (data?.notes ?? [])) {
-        if (DRY_RUN) { totals.notes++; continue; }
-        try {
-          await stgPost(`/contacts/${stgId}/notes`, strip(n, ['id', 'contactId', 'dateAdded']));
-          totals.notes++;
-        } catch { totals.fail++; }
-        await sleep(RATE_LIMIT_MS);
+function logUniqueError(stage, prodId, err) {
+  // Dedup key: strip per-contact IDs and traceIds out of the error message
+  // so "POST /contacts/X/notes → 422: {...}" and "POST /contacts/Y/notes → 422: {...}"
+  // match the same pattern.
+  const dedupMessage = err.message
+    .replace(/\/contacts\/[A-Za-z0-9]+/g, '/contacts/{id}')
+    .replace(/"traceId":"[^"]+"/g, '"traceId":"..."')
+    .slice(0, 200);
+  const key = `${stage}|${dedupMessage}`;
+  if (seenErrorPatterns.has(key)) return;
+  seenErrorPatterns.add(key);
+  console.error(`  ERR [${stage}] new pattern (#${seenErrorPatterns.size}) — contact=${prodId}: ${err.message}`);
+}
+
+async function processOneContact(prodId, totals) {
+  const stgId = idMap.contacts.get(prodId);
+
+  // notes (whitelist: only `body`; bodyText/userId/pinned/relations rejected)
+  try {
+    const data = await prodGet(`/contacts/${prodId}/notes`);
+    for (const n of (data?.notes ?? [])) {
+      if (DRY_RUN) { totals.notes++; continue; }
+      if (!n.body) continue;
+      try {
+        await stgPost(`/contacts/${stgId}/notes`, { body: n.body });
+        totals.notes++;
+      } catch (err) {
+        totals.fail++;
+        logUniqueError('notes', prodId, err);
       }
-    } catch {}
+      await sleep(RATE_LIMIT_MS);
+    }
+  } catch (err) { logUniqueError('notes-fetch', prodId, err); }
 
-    // --- tasks ---
-    try {
-      const data = await prodGet(`/contacts/${prodId}/tasks`);
-      for (const t of (data?.tasks ?? [])) {
-        if (DRY_RUN) { totals.tasks++; continue; }
-        try {
-          await stgPost(`/contacts/${stgId}/tasks`, strip(t, ['id', 'contactId', 'dateAdded']));
-          totals.tasks++;
-        } catch { totals.fail++; }
-        await sleep(RATE_LIMIT_MS);
+  // tasks (whitelist: title, dueDate, completed required)
+  try {
+    const data = await prodGet(`/contacts/${prodId}/tasks`);
+    for (const t of (data?.tasks ?? [])) {
+      if (DRY_RUN) { totals.tasks++; continue; }
+      if (!t.title || !t.dueDate) continue;
+      const payload = { title: t.title, dueDate: t.dueDate, completed: Boolean(t.completed) };
+      if (t.body) payload.body = t.body;
+      try {
+        await stgPost(`/contacts/${stgId}/tasks`, payload);
+        totals.tasks++;
+      } catch (err) {
+        totals.fail++;
+        logUniqueError('tasks', prodId, err);
       }
-    } catch {}
+      await sleep(RATE_LIMIT_MS);
+    }
+  } catch (err) { logUniqueError('tasks-fetch', prodId, err); }
 
-    // --- tags (array on the contact object; re-fetch since wipe lost them) ---
-    try {
-      const c = await prodGet(`/contacts/${prodId}`);
-      const tags = c?.contact?.tags ?? [];
-      if (tags.length > 0) {
+  // tags only (followers intentionally dropped — array contains prod user IDs
+  // that don't exist on staging; mapping isn't desired per scope decision).
+  try {
+    const c = await prodGet(`/contacts/${prodId}`);
+    const tags = c?.contact?.tags ?? [];
+    if (tags.length > 0) {
+      try {
         if (!DRY_RUN) await stgPost(`/contacts/${stgId}/tags`, { tags });
         totals.tags += tags.length;
+      } catch (err) {
+        totals.fail++;
+        logUniqueError('tags', prodId, err);
       }
-    } catch { totals.fail++; }
+    }
+  } catch (err) {
+    totals.fail++;
+    logUniqueError('contact-fetch', prodId, err);
+  }
+}
 
-    // --- followers (array on contact object) ---
-    try {
-      const c = await prodGet(`/contacts/${prodId}`);
-      const followers = c?.contact?.followers ?? [];
-      if (followers.length > 0) {
-        if (!DRY_RUN) await stgPost(`/contacts/${stgId}/followers`, { followers });
-        totals.followers += followers.length;
-      }
-    } catch { totals.fail++; }
+async function copyPerContactNested() {
+  if (isCompleted('perContactNested')) { console.log('[per-contact nested] skipped'); return; }
+  const NESTED_CONCURRENCY = 5; // bursty; 429s handled via Retry-After backoff
+  const totals = { notes: 0, tasks: 0, tags: 0, followers: 0, fail: 0 };
+  const prodIds = [...idMap.contacts.keys()];
+  const startIdx = state.lastNestedIndex ?? 0;
+  console.log(`[per-contact nested] starting (concurrency=${NESTED_CONCURRENCY}, from idx ${startIdx}/${prodIds.length})`);
 
-    if ((i + 1) % 100 === 0) {
-      console.log(`    contact ${i + 1}/${prodIds.length} (notes=${totals.notes}, tasks=${totals.tasks}, tags=${totals.tags}, followers=${totals.followers})`);
+  for (let i = startIdx; i < prodIds.length; i += NESTED_CONCURRENCY) {
+    const batchEnd = Math.min(i + NESTED_CONCURRENCY, prodIds.length);
+    const batch = prodIds.slice(i, batchEnd);
+    await Promise.all(batch.map((prodId) => processOneContact(prodId, totals)));
+
+    if (batchEnd % 100 === 0 || batchEnd === prodIds.length) {
+      state.lastNestedIndex = batchEnd;
+      console.log(`    contact ${batchEnd}/${prodIds.length} (notes=${totals.notes}, tasks=${totals.tasks}, tags=${totals.tags}, followers=${totals.followers})`);
       await saveState();
     }
-    await sleep(RATE_LIMIT_MS);
   }
+
+  delete state.lastNestedIndex;
   console.log(`[per-contact nested] done — notes=${totals.notes}, tasks=${totals.tasks}, tags=${totals.tags}, followers=${totals.followers}, fail=${totals.fail}`);
   await markCompleted('perContactNested');
 }
@@ -392,9 +495,69 @@ async function copyPerContactNested() {
 // OPPORTUNITIES (cursor-based; ID remapping via contact map)
 // ============================================================================
 
+// Whitelist of fields the POST /opportunities/ endpoint accepts. The list
+// response returns a superset including computed/legacy fields:
+// pipelineStageUId, lastStatusChangeAt, lastStageChangeAt, createdAt,
+// updatedAt, effectiveProbability, followers, relations, contact, sort,
+// attributions — all rejected by create. pipelineId + pipelineStageId are
+// remapped via a name-based lookup (snapshot regenerates IDs).
+const OPPORTUNITY_CREATE_FIELDS = [
+  'name', 'status', 'monetaryValue',
+  'source', 'customFields', 'tags', 'notes',
+];
+
+// Maps populated once at start of copyOpportunities (name-based lookup since
+// snapshot regenerates pipeline/stage IDs).
+const pipelineIdMap = new Map();        // prod_pipeline_id → staging_pipeline_id
+const stageIdMap = new Map();           // prod_stage_id → staging_stage_id
+const stagingPipelineIdsByName = new Map(); // pipeline_name → staging_pipeline_id (debug)
+
+async function buildPipelineMaps() {
+  const [prodResp, stgResp] = await Promise.all([
+    prodGet(`/opportunities/pipelines?locationId=${PROD_LOC}`),
+    stgGet(`/opportunities/pipelines?locationId=${STAGING_LOC}`),
+  ]);
+  const prodPipelines = prodResp?.pipelines ?? [];
+  const stgPipelines = stgResp?.pipelines ?? [];
+
+  // Build name → staging pipeline map
+  const stgByName = new Map();
+  for (const p of stgPipelines) stgByName.set(p.name, p);
+
+  let matched = 0, unmatched = 0;
+  for (const pp of prodPipelines) {
+    const sp = stgByName.get(pp.name);
+    if (!sp) { unmatched++; continue; }
+    pipelineIdMap.set(pp.id, sp.id);
+    stagingPipelineIdsByName.set(pp.name, sp.id);
+    // Build stage maps (each pipeline has its own stages)
+    const stgStagesByName = new Map();
+    for (const s of (sp.stages ?? [])) stgStagesByName.set(s.name, s);
+    for (const ps of (pp.stages ?? [])) {
+      const ss = stgStagesByName.get(ps.name);
+      if (ss) stageIdMap.set(ps.id, ss.id);
+    }
+    matched++;
+  }
+  console.log(`  Pipeline ID maps built: ${matched} matched / ${unmatched} unmatched (prod has ${prodPipelines.length} pipelines, staging has ${stgPipelines.length})`);
+  console.log(`  Stage ID map: ${stageIdMap.size} prod stages mapped to staging`);
+}
+
+function pickOpportunityPayload(o, locationId, stgContactId) {
+  const out = { locationId, contactId: stgContactId };
+  for (const k of OPPORTUNITY_CREATE_FIELDS) {
+    if (o[k] !== undefined && o[k] !== null) out[k] = o[k];
+  }
+  // Remap pipelineId + pipelineStageId from prod IDs → staging IDs
+  out.pipelineId = pipelineIdMap.get(o.pipelineId) ?? null;
+  out.pipelineStageId = stageIdMap.get(o.pipelineStageId) ?? null;
+  return out;
+}
+
 async function copyOpportunities() {
   if (isCompleted('opportunities')) { console.log('[opportunities] skipped'); return; }
   console.log('[opportunities] starting');
+  await buildPipelineMaps();
 
   const stagingExisting = await paginateOpportunitiesSearch(STAGING_KEY, STAGING_LOC);
   console.log(`  Staging has ${stagingExisting.length} to delete`);
@@ -408,15 +571,19 @@ async function copyOpportunities() {
   const prod = await paginateOpportunitiesSearch(PROD_KEY, PROD_LOC);
   console.log(`  Listed ${prod.length} prod opportunities`);
 
-  let ok = 0, fail = 0, orphan = 0;
+  let ok = 0, fail = 0, orphan = 0, unmappedPipeline = 0;
+  const oppErrorPatterns = new Set();
   for (let i = 0; i < prod.length; i++) {
     const o = prod[i];
     if (DRY_RUN) { ok++; continue; }
     const stgContactId = idMap.contacts.get(o.contactId);
     if (!stgContactId) { orphan++; continue; }
-    const payload = strip(o, ['id', 'locationId']);
-    payload.locationId = STAGING_LOC;
-    payload.contactId = stgContactId;
+    const payload = pickOpportunityPayload(o, STAGING_LOC, stgContactId);
+    if (!payload.pipelineId || !payload.pipelineStageId) {
+      unmappedPipeline++;
+      if (unmappedPipeline <= 3) console.error(`  opp ${o.id}: pipeline/stage not in name-map (prod_pipeline=${o.pipelineId})`);
+      continue;
+    }
     try {
       const created = await stgPost('/opportunities/', payload);
       const newId = created?.opportunity?.id ?? created?.id;
@@ -424,15 +591,23 @@ async function copyOpportunities() {
       ok++;
     } catch (err) {
       fail++;
-      if (fail <= 5) console.error(`  opp ${o.id}: ${err.message}`);
+      // Log unique error patterns (same dedup approach as nested step).
+      const dedup = err.message
+        .replace(/\/opportunities\/[A-Za-z0-9]+/g, '/opportunities/{id}')
+        .replace(/"traceId":"[^"]+"/g, '"traceId":"..."')
+        .slice(0, 200);
+      if (!oppErrorPatterns.has(dedup)) {
+        oppErrorPatterns.add(dedup);
+        console.error(`  ERR [opp] new pattern (#${oppErrorPatterns.size}) — opp=${o.id}: ${err.message}`);
+      }
     }
     if ((i + 1) % 100 === 0) {
-      console.log(`    ${i + 1}/${prod.length} (ok=${ok}, fail=${fail}, orphan=${orphan})`);
+      console.log(`    ${i + 1}/${prod.length} (ok=${ok}, fail=${fail}, orphan=${orphan}, unmappedPipeline=${unmappedPipeline})`);
       await saveState();
     }
     await sleep(RATE_LIMIT_MS);
   }
-  console.log(`[opportunities] done — ${ok} ok, ${fail} fail, ${orphan} orphan (contact not in map)`);
+  console.log(`[opportunities] done — ${ok} ok, ${fail} fail, ${orphan} orphan, ${unmappedPipeline} unmapped-pipeline`);
   await markCompleted('opportunities');
 }
 

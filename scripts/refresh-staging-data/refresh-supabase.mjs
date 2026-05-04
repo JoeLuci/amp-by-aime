@@ -33,8 +33,46 @@ import { spawnSync } from 'node:child_process';
 const PROD_REF = 'jrinrobepqsofuhjnxcp';
 const STAGING_REF = 'nuuffnxjsjqdoubvrtcl';
 const SCHEMAS = ['public', 'auth', 'storage'];
-const BATCH_ROWS = 500;
+const BATCH_ROWS = 50; // Conservative — Management API has request size limits; smaller batches handle wide rows safely
 const DRY_RUN = process.argv.includes('--dry-run');
+
+// Staging-specific overrides — run after the refresh to undo prod values that
+// staging needs different. AIME-7 swapped live Stripe IDs to test IDs in
+// `subscription_plans` and `allowed_stripe_prices`; refreshing from prod would
+// otherwise put the live IDs back and break test-mode checkout.
+const STAGING_OVERRIDES_SQL = `
+BEGIN;
+
+-- subscription_plans: live → test stripe IDs (12 rows)
+UPDATE subscription_plans SET stripe_price_id = 'price_1TQwVWKq6gZ6OHL8f938nXP4', stripe_product_id = 'prod_UPm3304pI5RsoC' WHERE stripe_price_id = 'price_1PtZuiKq6gZ6OHL8dRdkjr8G';
+UPDATE subscription_plans SET stripe_price_id = 'price_1TQwW4Kq6gZ6OHL83l8AiTyT', stripe_product_id = 'prod_UPm3304pI5RsoC' WHERE stripe_price_id = 'price_1PtZvAKq6gZ6OHL8AKsPuIYS';
+UPDATE subscription_plans SET stripe_price_id = 'price_1TQwSZKq6gZ6OHL8jQmugOWY', stripe_product_id = 'prod_UPm0uR2XTZyQD5' WHERE stripe_price_id = 'price_1RhZVaKq6gZ6OHL8DcBogOUv';
+UPDATE subscription_plans SET stripe_price_id = 'price_1TQwSoKq6gZ6OHL8tFt62mPQ', stripe_product_id = 'prod_UPm0uR2XTZyQD5' WHERE stripe_price_id = 'price_1RhZVyKq6gZ6OHL8e5GtRB3r';
+UPDATE subscription_plans SET stripe_price_id = 'price_1TQwUUKq6gZ6OHL8tlEEfunE', stripe_product_id = 'prod_UPm2aOwTciYldj' WHERE stripe_price_id = 'price_1PtZmdKq6gZ6OHL8b8D2okBw';
+UPDATE subscription_plans SET stripe_price_id = 'price_1TQwUsKq6gZ6OHL8B4FJeD95', stripe_product_id = 'prod_UPm2aOwTciYldj' WHERE stripe_price_id = 'price_1PtZoCKq6gZ6OHL8NhK2QLQA';
+UPDATE subscription_plans SET stripe_price_id = 'price_1TQwTNKq6gZ6OHL85IISJrkU', stripe_product_id = 'prod_UPm15sNyELkzkM' WHERE stripe_price_id = 'price_1RhZUuKq6gZ6OHL8l77hU8fR';
+UPDATE subscription_plans SET stripe_price_id = 'price_1TQwTkKq6gZ6OHL8bLmN8twV', stripe_product_id = 'prod_UPm15sNyELkzkM' WHERE stripe_price_id = 'price_1RhZUuKq6gZ6OHL8ZZtf3w8g';
+UPDATE subscription_plans SET stripe_price_id = 'price_1TQwYAKq6gZ6OHL8R4xrppr4', stripe_product_id = 'prod_UPm4lFx6IoqoZc' WHERE stripe_price_id = 'price_1PtZw5Kq6gZ6OHL8SlbrZqOA';
+UPDATE subscription_plans SET stripe_price_id = 'price_1TQwYAKq6gZ6OHL8gZNoBnOJ', stripe_product_id = 'prod_UPm4lFx6IoqoZc' WHERE stripe_price_id = 'price_1PtZwTKq6gZ6OHL8zRSVLHKi';
+UPDATE subscription_plans SET stripe_price_id = 'price_1TQwROKq6gZ6OHL8QYX8vKET', stripe_product_id = 'prod_UPlxyVSyzgJ9wW' WHERE stripe_price_id = 'price_1RhZWaKq6gZ6OHL8kdecStbM';
+UPDATE subscription_plans SET stripe_price_id = 'price_1TQwRWKq6gZ6OHL8S3mn3of6', stripe_product_id = 'prod_UPlxyVSyzgJ9wW' WHERE stripe_price_id = 'price_1RhZWtKq6gZ6OHL8C0YVDBR1';
+
+-- allowed_stripe_prices: same 12 swaps
+UPDATE allowed_stripe_prices SET stripe_price_id = 'price_1TQwVWKq6gZ6OHL8f938nXP4', stripe_product_id = 'prod_UPm3304pI5RsoC' WHERE stripe_price_id = 'price_1PtZuiKq6gZ6OHL8dRdkjr8G';
+UPDATE allowed_stripe_prices SET stripe_price_id = 'price_1TQwW4Kq6gZ6OHL83l8AiTyT', stripe_product_id = 'prod_UPm3304pI5RsoC' WHERE stripe_price_id = 'price_1PtZvAKq6gZ6OHL8AKsPuIYS';
+UPDATE allowed_stripe_prices SET stripe_price_id = 'price_1TQwSZKq6gZ6OHL8jQmugOWY', stripe_product_id = 'prod_UPm0uR2XTZyQD5' WHERE stripe_price_id = 'price_1RhZVaKq6gZ6OHL8DcBogOUv';
+UPDATE allowed_stripe_prices SET stripe_price_id = 'price_1TQwSoKq6gZ6OHL8tFt62mPQ', stripe_product_id = 'prod_UPm0uR2XTZyQD5' WHERE stripe_price_id = 'price_1RhZVyKq6gZ6OHL8e5GtRB3r';
+UPDATE allowed_stripe_prices SET stripe_price_id = 'price_1TQwUUKq6gZ6OHL8tlEEfunE', stripe_product_id = 'prod_UPm2aOwTciYldj' WHERE stripe_price_id = 'price_1PtZmdKq6gZ6OHL8b8D2okBw';
+UPDATE allowed_stripe_prices SET stripe_price_id = 'price_1TQwUsKq6gZ6OHL8B4FJeD95', stripe_product_id = 'prod_UPm2aOwTciYldj' WHERE stripe_price_id = 'price_1PtZoCKq6gZ6OHL8NhK2QLQA';
+UPDATE allowed_stripe_prices SET stripe_price_id = 'price_1TQwTNKq6gZ6OHL85IISJrkU', stripe_product_id = 'prod_UPm15sNyELkzkM' WHERE stripe_price_id = 'price_1RhZUuKq6gZ6OHL8l77hU8fR';
+UPDATE allowed_stripe_prices SET stripe_price_id = 'price_1TQwTkKq6gZ6OHL8bLmN8twV', stripe_product_id = 'prod_UPm15sNyELkzkM' WHERE stripe_price_id = 'price_1RhZUuKq6gZ6OHL8ZZtf3w8g';
+UPDATE allowed_stripe_prices SET stripe_price_id = 'price_1TQwYAKq6gZ6OHL8R4xrppr4', stripe_product_id = 'prod_UPm4lFx6IoqoZc' WHERE stripe_price_id = 'price_1PtZw5Kq6gZ6OHL8SlbrZqOA';
+UPDATE allowed_stripe_prices SET stripe_price_id = 'price_1TQwYAKq6gZ6OHL8gZNoBnOJ', stripe_product_id = 'prod_UPm4lFx6IoqoZc' WHERE stripe_price_id = 'price_1PtZwTKq6gZ6OHL8zRSVLHKi';
+UPDATE allowed_stripe_prices SET stripe_price_id = 'price_1TQwROKq6gZ6OHL8QYX8vKET', stripe_product_id = 'prod_UPlxyVSyzgJ9wW' WHERE stripe_price_id = 'price_1RhZWaKq6gZ6OHL8kdecStbM';
+UPDATE allowed_stripe_prices SET stripe_price_id = 'price_1TQwRWKq6gZ6OHL8S3mn3of6', stripe_product_id = 'prod_UPlxyVSyzgJ9wW' WHERE stripe_price_id = 'price_1RhZWtKq6gZ6OHL8C0YVDBR1';
+
+COMMIT;
+`;
 
 // ---------------------------------------------------------------------------
 // Auth: personal access token from env, or macOS Keychain (supabase login)
@@ -119,7 +157,9 @@ function pickTag(json) {
     const tag = `J${i.toString(36)}`;
     if (!json.includes(`$${tag}$`)) return tag;
   }
-  throw new Error('Could not pick a non-colliding dollar tag');
+  // Surface enough info to act on if this ever happens — extremely unlikely
+  // (would need real data containing all of $J0$..$Jrr$ patterns).
+  throw new Error(`pickTag: all 1000 candidate dollar-quote tags found in row data (length=${json.length}). Reduce BATCH_ROWS or pre-encode rows.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +281,10 @@ async function main() {
     }
   }
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+
+  console.log('\n[6/6] Applying staging-specific overrides (Stripe live → test IDs)...');
+  await mgmtSql(STAGING_REF, STAGING_OVERRIDES_SQL);
+  console.log('  done — subscription_plans + allowed_stripe_prices rolled back to test IDs.');
 
   console.log('\n================================================================');
   console.log(`Done. ${totalRows} rows loaded across ${tables.length - errors.length} tables in ${elapsed}s.`);
