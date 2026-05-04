@@ -31,18 +31,26 @@ export default async function LendersPage() {
           id,
           name,
           slug,
-          color
+          color,
+          display_order
         )
       `)
       .eq('is_active', true)
       .order('display_order', { ascending: true })
   ])
 
+  const sortedLenders = (lenders || []).slice().sort((a, b) => {
+    const aCat = a.category?.display_order ?? Number.MAX_SAFE_INTEGER
+    const bCat = b.category?.display_order ?? Number.MAX_SAFE_INTEGER
+    if (aCat !== bCat) return aCat - bCat
+    return (a.display_order ?? 0) - (b.display_order ?? 0)
+  })
+
   // Apply view-as override if active
   const profile = applyViewAsOverride(profileData, viewAsSettings)
 
   // Filter lenders based on user access
-  const filteredLenders = (lenders || []).filter(lender => {
+  const filteredLenders = sortedLenders.filter(lender => {
     // Admins can see everything
     if (profile?.is_admin) {
       return true
