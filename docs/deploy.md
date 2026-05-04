@@ -32,8 +32,7 @@ Feature branches do NOT deploy.
    git checkout main && git pull origin main
    ```
 
-2. **Create a feature branch** off `main`. Name it after the Jira ticket
-   (no `akb-` or other personal prefix):
+2. **Create a feature branch** off `main`. Name it after the Jira ticket:
    ```
    git checkout -b aime-12-add-foo-feature
    ```
