@@ -34,3 +34,11 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Refresh staging data
+
+Staging Supabase + GHL can be re-seeded with current prod data using
+`scripts/refresh-staging-data/`. See
+[`scripts/refresh-staging-data/README.md`](./scripts/refresh-staging-data/README.md)
+for required env vars and usage. Note: PII is not anonymized — staging
+intentionally mirrors prod so prod users can log into staging.
