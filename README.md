@@ -35,6 +35,11 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
+## Deployment
+
+How code gets from a feature branch to staging to prod, who approves, and
+how to roll back: [`docs/deploy.md`](./docs/deploy.md).
+
 ## Refresh staging data
 
 Staging Supabase + GHL can be re-seeded with current prod data using
