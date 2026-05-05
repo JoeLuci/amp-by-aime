@@ -1,3 +1,7 @@
+-- Before running: replace <STAGING_SERVICE_ROLE_KEY> below with the actual
+-- staging Supabase service_role JWT (Project Settings → API → service_role).
+-- Do not commit the substituted version. Run via Supabase SQL Editor.
+
 SELECT cron.schedule(
   'reset-annual-escalations',
   '0 3 * * *',
@@ -10,7 +14,7 @@ SELECT cron.schedule(
   $$
     SELECT net.http_post(
       url := 'https://nuuffnxjsjqdoubvrtcl.supabase.co/functions/v1/expire-overrides',
-      headers := '{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51dWZmbnhqc2pxZG91YnZydGNsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzUwMTcyNywiZXhwIjoyMDkzMDc3NzI3fQ.74sPt3CEdxb_nkpQoE1eqaGXu3Vy7y_YGCb6foIwCdM"}'::jsonb
+      headers := '{"Authorization": "Bearer <STAGING_SERVICE_ROLE_KEY>"}'::jsonb
     );
   $$
 );

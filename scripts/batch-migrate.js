@@ -1,7 +1,14 @@
 #!/usr/bin/env node
 
-const SUPABASE_URL = "https://jrinrobepqsofuhjnxcp.supabase.co";
-const SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpyaW5yb2JlcHFzb2Z1aGpueGNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MTc4MzE3OCwiZXhwIjoyMDc3MzU5MTc4fQ.smHhYNpqZ4rj3BRF3O8gbUFnryDJ9LUUKIMb86HFlHA";
+// Required env vars — fail fast rather than silently default to a hardcoded
+// prod value. Pass via env at invocation time:
+//   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/batch-migrate.js
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!SUPABASE_URL || !SERVICE_KEY) {
+  console.error('Required env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY');
+  process.exit(1);
+}
 
 const CONCURRENCY = 3; // Safe for rate limits
 const DELAY_BETWEEN_BATCHES = 1000; // 1 second between batches
