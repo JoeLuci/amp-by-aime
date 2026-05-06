@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { planId, billingInterval, returnUrl } = await request.json()
+    const { planId, billingInterval, returnUrl, embedded } = await request.json()
 
     if (!planId) {
       return NextResponse.json(
@@ -148,8 +148,6 @@ export async function POST(request: NextRequest) {
           quantity: 1,
         },
       ],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
       allow_promotion_codes: true, // Allow users to enter coupon codes at checkout
       metadata: {
         supabase_user_id: user.id,
@@ -158,6 +156,15 @@ export async function POST(request: NextRequest) {
         first_name: firstName,
         last_name: lastName,
       },
+    }
+
+    if (embedded) {
+      // Embedded Checkout: stays on our page, post-payment handled in JS via onComplete
+      sessionConfig.ui_mode = 'embedded'
+      sessionConfig.redirect_on_completion = 'never'
+    } else {
+      sessionConfig.success_url = successUrl
+      sessionConfig.cancel_url = cancelUrl
     }
 
     // Add trial period for Free Trial
@@ -170,7 +177,11 @@ export async function POST(request: NextRequest) {
     // Create checkout session
     const session = await stripe.checkout.sessions.create(sessionConfig)
 
-    return NextResponse.json({ sessionId: session.id, url: session.url })
+    return NextResponse.json({
+      sessionId: session.id,
+      url: session.url,
+      clientSecret: session.client_secret,
+    })
   } catch (error) {
     console.error('Checkout error:', error)
     return NextResponse.json(
