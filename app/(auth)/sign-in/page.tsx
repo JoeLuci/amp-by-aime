@@ -73,17 +73,8 @@ function SignInContent() {
 
   return (
     <div className="min-h-screen relative flex items-center justify-center p-4">
-      {/* Background Image */}
-      <div className="absolute inset-0 z-0">
-        <Image
-          src="/assets/AMP-BackgroundFull-optimized.jpg"
-          alt="AMP Background"
-          fill
-          className="object-cover"
-          priority
-        />
-        <div className="absolute inset-0 dotted-pattern" />
-      </div>
+      {/* Solid brand background */}
+      <div className="absolute inset-0 z-0 bg-[#021649]" />
 
       <div className="relative z-10 w-full max-w-md space-y-6">
         {/* Logo */}
