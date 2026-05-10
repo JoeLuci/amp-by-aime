@@ -67,6 +67,27 @@ Feature branches do NOT deploy.
 - Never push directly to `main` or `staging` from a working branch.
 - Never merge to `main` locally — `main` is updated only via PR merge on GitHub.
 
+## Smoke tests (AIME-11)
+
+Every PR `staging → main` triggers the `staging-smoke` GitHub Actions
+workflow. The workflow runs a Playwright suite against the staging URL
+covering: login, dashboard home, purchase escalations, market (vendor
+listing), and resources. The workflow's `smoke` job is a required status
+check on `main` — the merge button stays blocked until it passes.
+
+- Failure path: the PR's required status check goes red (which itself
+  blocks merge and emails subscribers via GitHub's default
+  notifications). A Playwright HTML report + traces upload to the
+  workflow run's artifacts so you can download the trace and see exactly
+  what the page rendered at the moment of failure.
+- The suite runs in under 3 minutes. If it ever exceeds, investigate
+  before relaxing the timeout.
+- The fixture user lives in staging Supabase. If the staging data is
+  re-seeded via `scripts/refresh-staging-data/`, the fixture's `profiles`
+  row may be wiped — re-run the fixture SQL from
+  `docs/superpowers/specs/2026-05-06-aime-11-staging-smoke-tests-design.md`
+  to restore it.
+
 ## Rollback
 
 ### Railway (replaces "Vercel" in the original AC text — actual platform is Railway)
