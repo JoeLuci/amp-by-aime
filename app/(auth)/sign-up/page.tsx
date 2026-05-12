@@ -20,6 +20,7 @@ import {
   standardFeatures,
   standardFeatureMatrix,
 } from '@/lib/plans'
+import { captureUtmIfPresent, getStoredAttribution } from '@/lib/utm'
 
 interface AppliedCoupon {
   code: string
@@ -29,7 +30,7 @@ interface AppliedCoupon {
   label: string
 }
 
-const HIDDEN_PLAN_IDS = new Set(['elite'])
+const HIDDEN_PLAN_IDS = new Set<string>()
 const SUPPORT_EMAIL = 'brokermembership@aimegroup.com'
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!)
@@ -82,6 +83,10 @@ export default function SignUpPage() {
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null)
   const [isFeaturesOpen, setIsFeaturesOpen] = useState(false)
 
+  useEffect(() => {
+    captureUtmIfPresent()
+  }, [])
+
   const selectedPlanData =
     visiblePlans.find((p) => p.id === selectedPlan) ?? visiblePlans[0]
   const baseAmount = getPlanAmountCents(selectedPlanData, isAnnual)
@@ -108,7 +113,7 @@ export default function SignUpPage() {
       <PageBackground />
 
       <div className="relative z-10 px-4 py-10 md:py-14">
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-7xl mx-auto">
           <div className="text-center mb-8">
             <Image
               src="/assets/AMP_MemberPortalLogo_White.svg"
@@ -300,6 +305,7 @@ function CheckoutForm({
       if (!data.user?.id) throw new Error('Account creation failed')
 
       const userId = data.user.id
+      const attribution = getStoredAttribution()
 
       try {
         await fetch('/api/ghl/create-contact', {
@@ -311,6 +317,7 @@ function CheckoutForm({
             fullName: formData.fullName,
             phone: formData.phone,
             role: 'loan_officer',
+            attribution,
           }),
         })
       } catch (ghlError) {
@@ -319,7 +326,10 @@ function CheckoutForm({
 
       await supabase
         .from('profiles')
-        .update({ onboarding_step: 'complete_profile' })
+        .update({
+          onboarding_step: 'complete_profile',
+          ...(attribution ? { attribution } : {}),
+        })
         .eq('id', userId)
 
       const checkoutRes = await fetch('/api/checkout/payment-element', {
@@ -603,7 +613,7 @@ function CheckoutForm({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {visiblePlans.map((p) => {
                 const selected = selectedPlan === p.id
                 return (

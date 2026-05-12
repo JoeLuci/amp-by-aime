@@ -13,7 +13,16 @@ function getSupabaseAdmin() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { userId, email, fullName, phone, role, nmlsNumber, companyName } = body
+    const {
+      userId,
+      email,
+      fullName,
+      phone,
+      role,
+      nmlsNumber,
+      companyName,
+      attribution,
+    } = body
 
     if (!userId || !email) {
       return NextResponse.json(
@@ -27,6 +36,25 @@ export async function POST(request: NextRequest) {
     const firstName = nameParts[0] || ''
     const lastName = nameParts.slice(1).join(' ') || ''
 
+    const attributionFields =
+      attribution && typeof attribution === 'object'
+        ? {
+            ...(attribution.utm_source && { utm_source: attribution.utm_source }),
+            ...(attribution.utm_medium && { utm_medium: attribution.utm_medium }),
+            ...(attribution.utm_campaign && {
+              utm_campaign: attribution.utm_campaign,
+            }),
+            ...(attribution.utm_term && { utm_term: attribution.utm_term }),
+            ...(attribution.utm_content && {
+              utm_content: attribution.utm_content,
+            }),
+            ...(attribution.referrer && { referrer_url: attribution.referrer }),
+            ...(attribution.landing_path && {
+              landing_path: attribution.landing_path,
+            }),
+          }
+        : {}
+
     // Create/update contact in GHL
     const ghlResult = await ghlClient.upsertContact({
       firstName,
@@ -39,6 +67,7 @@ export async function POST(request: NextRequest) {
         ...(nmlsNumber && { nmls_number: nmlsNumber }),
         aime_user_id: userId,
         signup_source: 'amp_portal',
+        ...attributionFields,
       },
     })
 
