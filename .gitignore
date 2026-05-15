@@ -65,3 +65,6 @@ docs/superpowers/
 
 # Misc archives
 *.zip
+
+# AIME-12 ad-hoc audit scripts (local-only; deliverable is docs/aime-12-make-scenarios-audit.md)
+/.aime-12-*.mjs
